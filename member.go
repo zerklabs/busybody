@@ -5,24 +5,22 @@ import (
 	// "github.com/gdamore/mangos/transport/tlstcp"
 
 	"fmt"
-	"hash/crc32"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/gdamore/mangos"
-	"github.com/gdamore/mangos/protocol/bus"
-	"github.com/gdamore/mangos/transport/tcp"
 	"github.com/zerklabs/auburn/log"
+	"github.com/zerklabs/busybody/protocol"
 )
 
 // tls+tcp://x.x.x.x:ZZZZ
 
 type BusyMember struct {
 	msgsync sync.Mutex
+	lock    sync.RWMutex
 
-	lock      sync.Mutex
-	sock      mangos.Socket
+	bussock   mangos.Socket
 	config    BusyConfig
 	id        string
 	hostname  string
@@ -37,32 +35,8 @@ type BusyMember struct {
 	peerShareTicker *time.Ticker
 }
 
-func initsock() (mangos.Socket, error) {
-	var sock mangos.Socket
-	var err error
-	// var msg []byte
-
-	if sock, err = bus.NewSocket(); err != nil {
-		// log.Errorf("bus.NewSocket: %s", err)
-		return sock, err
-	}
-
-	sock.AddTransport(tcp.NewTransport())
-
-	// sock.Listen()
-
-	return sock, nil
-}
-
-func hashHostname() string {
-	crchash := crc32.NewIEEE()
-	crchash.Write([]byte(hostname))
-
-	return fmt.Sprintf("%x", crchash.Sum(nil))
-}
-
 func New(config []byte) (BusyMember, error) {
-	sock, err := initsock()
+	bussock, err := createBusSock(make(map[string]interface{}, 0))
 	if err != nil {
 		return BusyMember{}, err
 	}
@@ -81,8 +55,8 @@ func New(config []byte) (BusyMember, error) {
 
 	member := BusyMember{
 		hostname:         hostname,
-		id:               hashHostname(),
-		sock:             sock,
+		id:               crc32hash(hostname),
+		bussock:          bussock,
 		config:           conf,
 		terminate:        false,
 		introTicker:      time.NewTicker(introDuration),
@@ -132,10 +106,14 @@ func (m *BusyMember) AddPeer(peer string) error {
 	}
 
 	if !exists {
-		m.peers = append(m.peers, Introduction{Uri: peer})
-		if err := m.sock.Dial(peer); err != nil {
+		intro := Introduction{Uri: peer}
+		if err := m.bussock.Dial(peer); err != nil {
 			return err
 		}
+
+		// flag the connection state
+		intro.connected = true
+		m.peers = append(m.peers, intro)
 
 		// pause for join
 		time.Sleep(time.Second)
@@ -147,17 +125,51 @@ func (m *BusyMember) AddPeer(peer string) error {
 	return nil
 }
 
+func (m *BusyMember) Members() []Introduction {
+	m.lock.RLock()
+	defer m.lock.RUnlock()
+
+	return m.peers
+}
+
+func (m *BusyMember) DialBus(p *Introduction) error {
+	if err := m.bussock.Dial(p.Uri); err != nil {
+		return err
+	}
+
+	// pause for join
+	time.Sleep(time.Second)
+	if m.config.LogLevel >= log.INFO {
+		log.Infof("added and successfully connected to: %s (%s)", p.Id, p.Uri)
+	}
+
+	p.connected = true
+
+	return nil
+}
+
 func (m *BusyMember) updatePeer(intro Introduction) error {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
 	exists := false
+	if intro.Id == m.id {
+		return fmt.Errorf("cannot add self to peer list")
+	}
 
 	for i, v := range m.peers {
 		if v.Uri == intro.Uri {
 			exists = true
 			if v.Id == "" && v.Key == "" {
 				m.peers[i] = intro
+				if m.peers[i].connected {
+					m.peers[i] = intro
+					m.peers[i].connected = true
+				} else {
+					if err := m.DialBus(&m.peers[i]); err != nil {
+						return err
+					}
+				}
 
 				if m.config.LogLevel >= log.INFO {
 					log.Infof("updated peer: %#v", intro)
@@ -167,16 +179,11 @@ func (m *BusyMember) updatePeer(intro Introduction) error {
 	}
 
 	if !exists {
-		m.peers = append(m.peers, intro)
-		if err := m.sock.Dial(intro.Uri); err != nil {
+		if err := m.DialBus(&intro); err != nil {
 			return err
 		}
 
-		// pause for join
-		time.Sleep(time.Second)
-		if m.config.LogLevel >= log.INFO {
-			log.Infof("added and successfully connected to: %s (%s)", intro.Id, intro.Uri)
-		}
+		m.peers = append(m.peers, intro)
 	}
 
 	return nil
@@ -199,16 +206,13 @@ func (m *BusyMember) notificationLoop() {
 	for {
 		select {
 		case <-m.introTicker.C:
-			if m.config.LogLevel >= log.DEBUG {
-				log.Debugf("intro ticker: current peers: %#v", m.peers)
-			}
 			if err := m.hello(); err != nil {
 				log.Error(err)
 			}
 		case <-m.peerShareTicker.C:
 			if m.config.PeerSharing {
 				if m.config.LogLevel >= log.DEBUG {
-					log.Debugf("peer share ticker: current peers: %#v", m.peers)
+					log.Debugf("sharing %d peers", len(m.peers))
 				}
 				if err := m.share(); err != nil {
 					log.Error(err)
@@ -225,13 +229,13 @@ func (m *BusyMember) handlerLoop() {
 			goto exit
 		}
 
-		if message.Type == StandardMessage {
+		if message.Type == protocol.StandardMessage {
 			for _, handler := range m.handlers {
 				handler.HandleMessage(&message)
 			}
 		}
 
-		if message.Type == HelloMessage {
+		if message.Type == protocol.HelloMessage {
 			intro, err := UnmarshalIntroduction(&message)
 			if err != nil {
 				log.Error(err)
@@ -245,7 +249,6 @@ func (m *BusyMember) handlerLoop() {
 				continue
 			}
 
-			// log.Infof("received authorized introduction: %#v", intro)
 			if err := m.updatePeer(intro); err != nil {
 				log.Error(err)
 			}
@@ -271,7 +274,7 @@ func (m *BusyMember) Listen() error {
 	defer m.Close()
 
 	// start our listener
-	if err := m.sock.Listen(m.config.Uri); err != nil {
+	if err := m.bussock.Listen(m.config.Uri); err != nil {
 		return err
 	}
 
@@ -279,19 +282,27 @@ func (m *BusyMember) Listen() error {
 	go m.handlerLoop()
 	go m.notificationLoop()
 
-	// now sleep to give everyone a chance to start listening
-	// time.Sleep(time.Second)
-
 	for {
 		if m.terminate {
 			return nil
 		}
 
-		if msg, err = m.sock.Recv(); err != nil {
+		if msg, err = m.bussock.Recv(); err != nil {
 			return err
 		}
 
-		bmsg, err := UnmarshalBusyMessage(msg)
+		// TODO(rch): this should be present in the protocol header
+		ct := protocol.NoCompression
+
+		if m.config.DeflateCompression {
+			ct = protocol.DeflateCompression
+		}
+
+		if m.config.SnappyCompression {
+			ct = protocol.SnappyCompression
+		}
+
+		bmsg, err := UnmarshalBusyMessage(msg, ct)
 		if err != nil {
 			log.Error(err)
 			continue

@@ -4,36 +4,32 @@ import (
 	"bytes"
 	"encoding/gob"
 	"fmt"
+	"io"
 	"time"
 
+	"github.com/mreiferson/go-snappystream"
 	"github.com/zerklabs/auburn/log"
+	"github.com/zerklabs/busybody/protocol"
 
-	"code.google.com/p/snappy-go/snappy"
-)
-
-type MsgType int
-
-const (
-	HelloMessage MsgType = iota
-	StandardMessage
+	"compress/zlib"
 )
 
 type Introduction struct {
-	Key string
-	Id  string
-	Uri string
+	Key       string
+	Id        string
+	Uri       string
+	connected bool
 }
 
 type BusyMessage struct {
 	Body              []byte
-	Compressed        bool
 	Received          int64
 	RecipientTimezone string
 	RTT               time.Duration
 	Sender            string
 	SenderTimezone    string
 	Sent              int64
-	Type              MsgType
+	Type              protocol.MsgType
 }
 
 func (m *BusyMember) defaultMessage() BusyMessage {
@@ -41,16 +37,15 @@ func (m *BusyMember) defaultMessage() BusyMessage {
 		Sent:           time.Now().UnixNano(),
 		Received:       0,
 		Sender:         m.id,
-		Compressed:     m.config.Compression,
 		SenderTimezone: time.Local.String(),
-		Type:           StandardMessage,
+		Type:           protocol.StandardMessage,
 	}
 }
 
 func UnmarshalIntroduction(msg *BusyMessage) (Introduction, error) {
 	var intro Introduction
 
-	if msg.Type != HelloMessage {
+	if msg.Type != protocol.HelloMessage {
 		return Introduction{}, fmt.Errorf("not a hello message")
 	}
 
@@ -58,7 +53,11 @@ func UnmarshalIntroduction(msg *BusyMessage) (Introduction, error) {
 	decoder := gob.NewDecoder(buffer)
 
 	if err := decoder.Decode(&intro); err != nil {
-		return Introduction{}, fmt.Errorf("error gob decoding introduction: %v", err)
+		if err != io.EOF {
+			return Introduction{}, fmt.Errorf("error gob decoding introduction: %v", err)
+		} else {
+			log.Warnf("error during gob decoding: %v", err)
+		}
 	}
 
 	if intro.Id == "" {
@@ -76,16 +75,44 @@ func UnmarshalIntroduction(msg *BusyMessage) (Introduction, error) {
 	return intro, nil
 }
 
-func UnmarshalBusyMessage(raw []byte) (BusyMessage, error) {
+func UnmarshalBusyMessage(raw []byte, ct protocol.CompressionType) (BusyMessage, error) {
 	var msg BusyMessage
+	var err error
+	var buffer *bytes.Buffer
 
-	buffer := bytes.NewBuffer(raw)
+	rawBuffer := bytes.NewBuffer(raw)
+
+	if ct == protocol.SnappyCompression {
+		buffer, err = unsnapBusyMessage(rawBuffer)
+		if err != nil {
+			return BusyMessage{}, err
+		}
+	}
+
+	if ct == protocol.DeflateCompression {
+		buffer, err = deflateBusyMessage(rawBuffer)
+		if err != nil {
+			return BusyMessage{}, err
+		}
+	}
+
+	if ct == protocol.NoCompression {
+		buffer = rawBuffer
+	}
+
+	if buffer == nil {
+		return BusyMessage{}, fmt.Errorf("failed to decompress message")
+	}
 
 	// we send the actual payload as a gob, to avoid having to support textual encodings (json, msgpack, toml, etc..)
 	decoder := gob.NewDecoder(buffer)
 
 	if err := decoder.Decode(&msg); err != nil {
-		return BusyMessage{}, fmt.Errorf("error gob decoding message: %v", err)
+		if err != io.EOF {
+			return BusyMessage{}, fmt.Errorf("error gob decoding message: %v", err)
+		} else {
+			log.Warnf("error during gob decoding: %v", err)
+		}
 	}
 
 	msg.RecipientTimezone = time.Local.String()
@@ -96,18 +123,41 @@ func UnmarshalBusyMessage(raw []byte) (BusyMessage, error) {
 	recv := time.Unix(0, msg.Received)
 	msg.RTT = recv.Sub(sent)
 
-	if msg.Compressed {
-		rawBody := make([]byte, 0)
-		b, err := snappy.Decode(rawBody, msg.Body)
-		if err != nil {
-			return BusyMessage{}, fmt.Errorf("error decoding snappy stream: %v", err)
-		}
+	return msg, nil
+}
 
-		// log.Infof("snappy decode: b len %d, compressed body len: %d", len(b), len(msg.Body))
-		msg.Body = b
+func deflateBusyMessage(buf *bytes.Buffer) (*bytes.Buffer, error) {
+	deflatebuf := bytes.NewBuffer(nil)
+
+	dec, err := zlib.NewReader(buf)
+	if err != nil {
+		return nil, fmt.Errorf("error opening zlib stream: %v", err)
 	}
 
-	return msg, nil
+	if _, err := deflatebuf.ReadFrom(dec); err != nil {
+		log.Errorf("error reading from zlib stream: %v", err)
+		return nil, err
+	}
+
+	if err := dec.Close(); err != nil {
+		log.Errorf("error closing zlib stream: %v", err)
+		return nil, err
+	}
+
+	return deflatebuf, nil
+}
+
+func unsnapBusyMessage(buf *bytes.Buffer) (*bytes.Buffer, error) {
+	snapbuf := bytes.NewBuffer(nil)
+
+	r := snappystream.NewReader(buf, false)
+
+	if _, err := snapbuf.ReadFrom(r); err != nil {
+		log.Errorf("error reading from snappystream: %v", err)
+		return nil, err
+	}
+
+	return snapbuf, nil
 }
 
 // Send this nodes peer list to all of it's peers
@@ -119,8 +169,7 @@ func (m *BusyMember) share() error {
 		buffer := bytes.NewBuffer(nil)
 		encoder := gob.NewEncoder(buffer)
 		msg := m.defaultMessage()
-		msg.Type = HelloMessage
-		msg.Compressed = false
+		msg.Type = protocol.HelloMessage
 
 		if err := encoder.Encode(peer); err != nil {
 			return fmt.Errorf("error gob encoding message: %v", err)
@@ -144,8 +193,7 @@ func (m *BusyMember) hello() error {
 	encoder := gob.NewEncoder(buffer)
 
 	msg := m.defaultMessage()
-	msg.Type = HelloMessage
-	msg.Compressed = false
+	msg.Type = protocol.HelloMessage
 
 	if err := encoder.Encode(m.Introduction()); err != nil {
 		return fmt.Errorf("error gob encoding message: %v", err)
@@ -157,22 +205,14 @@ func (m *BusyMember) hello() error {
 }
 
 func (m *BusyMember) Send(content []byte) error {
-	msg := m.defaultMessage()
+	// msg := m.defaultMessage()
+	// msg.Body = content
+	proto := protocol.NewMessage(protocol.StandardMessage, protocol.SnappyCompression, m.id)
 
-	if m.config.Compression {
-		compressedBody := make([]byte, 0)
-		b, err := snappy.Encode(compressedBody, content)
-		if err != nil {
-			return fmt.Errorf("error encoding snappy stream: %v", err)
-		}
+	proto.Print()
 
-		// log.Infof("snappy encode: b len %d, compressed body len: %d", len(b), len(compressedBody))
-		msg.Body = b
-	} else {
-		msg.Body = content
-	}
-
-	return m.send(msg)
+	return nil
+	// return m.send(msg)
 }
 
 func (m *BusyMember) send(msg BusyMessage) error {
@@ -186,13 +226,72 @@ func (m *BusyMember) send(msg BusyMessage) error {
 		return fmt.Errorf("error gob encoding message: %v", err)
 	}
 
-	if m.config.LogLevel >= log.DEBUG {
-		log.Debugf("sending %d bytes across the wire", sendbuf.Len())
+	if m.config.LogLevel >= log.DEBUG && msg.Type == protocol.StandardMessage {
+		log.Debugf("compressing %d bytes", sendbuf.Len())
 	}
 
-	if err := m.sock.Send(sendbuf.Bytes()); err != nil {
+	// if m.config.SnappyCompression {
+	// 	return m.sendsnappy(sendbuf, msg.Type)
+	// }
+
+	// if m.config.DeflateCompression {
+	// 	return m.sendflate(sendbuf, msg.Type)
+	// }
+
+	if err := m.bussock.Send(sendbuf.Bytes()); err != nil {
 		return fmt.Errorf("error sending message: %v", err)
 	}
 
 	return nil
 }
+
+// func (m *BusyMember) sendsnappy(buf *bytes.Buffer, mt protocol.MsgType) error {
+// 	snapbuf := bytes.NewBuffer(nil)
+
+// 	w := snappystream.NewWriter(snapbuf)
+
+// 	if _, err := buf.WriteTo(w); err != nil {
+// 		return fmt.Errorf("error writing to snappystream: %v", err)
+// 	}
+
+// 	if m.config.LogLevel >= log.DEBUG && mt == protocol.StandardMessage {
+// 		log.Debugf("sending %d compressed bytes across the wire", snapbuf.Len())
+// 	}
+
+// 	if err := m.bussock.Send(snapbuf.Bytes()); err != nil {
+// 		return fmt.Errorf("error sending message: %v", err)
+// 	}
+
+// 	return nil
+// }
+
+// func (m *BusyMember) sendflate(buf *bytes.Buffer, mt protocol.MsgType) error {
+// 	flatebuf := bytes.NewBuffer(nil)
+
+// 	gz, err := zlib.NewWriterLevel(flatebuf, m.config.DeflateCompressionLevel)
+// 	if err != nil {
+// 		return err
+// 	}
+
+// 	if _, err := buf.WriteTo(gz); err != nil {
+// 		return fmt.Errorf("error writing to zlib stream: %v", err)
+// 	}
+
+// 	if err := gz.Flush(); err != nil {
+// 		log.Warnf("error flushing zlib stream: %v", err)
+// 	}
+
+// 	if err := gz.Close(); err != nil {
+// 		log.Warnf("error closing zlib stream: %v", err)
+// 	}
+
+// 	if m.config.LogLevel >= log.DEBUG && mt == protocol.StandardMessage {
+// 		log.Debugf("sending %d compressed bytes across the wire", flatebuf.Len())
+// 	}
+
+// 	if err := m.bussock.Send(flatebuf.Bytes()); err != nil {
+// 		return fmt.Errorf("error sending message: %v", err)
+// 	}
+
+// 	return nil
+// }

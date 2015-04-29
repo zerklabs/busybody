@@ -6,20 +6,20 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-const DefaultPeerShareInterval = "120s"
-const DefaultIntroductionInterval = "60s"
+const DefaultPeerShareInterval = "5m0s"
+const DefaultIntroductionInterval = "1m0s"
 
 type BusyConfig struct {
-	Uri                  string   `toml:"uri"`
-	Peers                []string `toml:"peers"`
-	SharedKey            string   `toml:"shared_key"`
-	Compression          bool     `toml:"compression"`
-	WireCompression      bool     `toml:"wire_compression"`
-	WireCompressionLevel int      `toml:"wire_compression_level"`
-	LogLevel             int      `toml:"log_level"`
-	IntroInterval        string   `toml:"introduction_interval"`
-	PeerSharing          bool     `toml:"enable_peer_sharing"`
-	PeerShareInterval    string   `toml:"peer_share_interval"`
+	Uri                     string   `toml:"uri"`
+	Peers                   []string `toml:"peers"`
+	SharedKey               string   `toml:"shared_key"`
+	SnappyCompression       bool     `toml:"snappy_compression"`
+	DeflateCompression      bool     `toml:"deflate_compression"`
+	DeflateCompressionLevel int      `toml:"deflate_compression_level"`
+	LogLevel                int      `toml:"log_level"`
+	IntroInterval           string   `toml:"introduction_interval"`
+	PeerSharing             bool     `toml:"enable_peer_sharing"`
+	PeerShareInterval       string   `toml:"peer_share_interval"`
 }
 
 func ParseConfig(config []byte) (BusyConfig, error) {
@@ -40,7 +40,9 @@ func ParseConfig(config []byte) (BusyConfig, error) {
 		conf.IntroInterval = DefaultPeerShareInterval
 	}
 
-	conf.WireCompression = true
+	if conf.SnappyCompression && conf.DeflateCompression {
+		return BusyConfig{}, fmt.Errorf("only snappy or deflate can be used")
+	}
 
 	return conf, nil
 }
