@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"bytes"
 	"encoding/binary"
 	"io"
 	"sync"
@@ -19,17 +20,12 @@ type MessageHeader struct {
 	timestamp       int64
 	bodyLen         int64
 	compBodyLen     int64
+
+	off int // buf offset
 }
 
 func buildMessageHeader(msgtype int, comptype int, id string) MessageHeader {
 	now := time.Now().UnixNano()
-	// test := uint32(msgtype&0xf)<<28 +
-	// 	uint32(comptype&0xf)<<16
-
-	// mt := int(test>>28) & 0xf
-	// ct := int(test>>16) & 0xf
-
-	// log.Infof("%d, %d, %d", test, mt, ct)
 
 	return MessageHeader{
 		version:         1,
@@ -39,6 +35,7 @@ func buildMessageHeader(msgtype int, comptype int, id string) MessageHeader {
 		compressionType: comptype,
 		bodyLen:         0,
 		compBodyLen:     0,
+		off:             0, // offset
 	}
 }
 
@@ -107,56 +104,41 @@ func decodeSourceId(v []byte) string {
 	return string(v)
 }
 
-func (h *MessageHeader) Write(w io.Writer) (int64, error) {
-	h.lock.Lock()
-	defer h.lock.Unlock()
-
-	var total int64
-
-	total = 0
+func (h *MessageHeader) Read(p []byte) (n int, err error) {
+	bytebuf := bytes.NewBuffer(nil)
 
 	flagsWord := h.encodeFlags()
 	tsWord := touint64(h.timestamp)
 
-	log.Infof("flags: %v", byteEncodeUint32(flagsWord))
-	n, err := w.Write(byteEncodeUint32(flagsWord))
-	if err != nil {
-		return total, err
+	buf := byteEncodeUint32(flagsWord)
+	// log.Infof("flags: %v, %d bytes", buf, len(buf))
+	bytebuf.Write(buf)
+
+	buf64 := byteEncodeUint64(tsWord)
+	// log.Infof("timestamp: %v, %d bytes", buf64, len(buf64))
+	bytebuf.Write(buf64)
+
+	buf64 = byteEncodeUint64(binary.BigEndian.Uint64([]byte(h.sourceId)))
+	// log.Infof("source id: %v, %d bytes", buf64, len(buf64))
+	bytebuf.Write(buf64)
+
+	buf64 = byteEncodeUint64(touint64(h.bodyLen))
+	// log.Infof("raw body length: %v, %d bytes", buf64, len(buf64))
+	bytebuf.Write(buf64)
+
+	buf64 = byteEncodeUint64(touint64(h.compBodyLen))
+	// log.Infof("comp body length: %v, %d bytes", buf64, len(buf64))
+	bytebuf.Write(buf64)
+
+	if h.off >= bytebuf.Len() {
+		if len(p) == 0 {
+			return
+		}
+		return 0, io.EOF
 	}
 
-	total = total + int64(n)
+	n = copy(p, bytebuf.Bytes()[h.off:])
+	h.off += n
 
-	log.Infof("timestamp: %v", byteEncodeUint64(tsWord))
-	n, err = w.Write(byteEncodeUint64(tsWord))
-	if err != nil {
-		return total, err
-	}
-
-	total = total + int64(n)
-
-	log.Infof("source id: %v", byteEncodeUint64(binary.BigEndian.Uint64([]byte(h.sourceId))))
-	n, err = w.Write(byteEncodeUint64(binary.BigEndian.Uint64([]byte(h.sourceId))))
-	if err != nil {
-		return total, err
-	}
-
-	total = total + int64(n)
-
-	log.Infof("raw body length: %v", byteEncodeUint64(touint64(h.bodyLen)))
-	n, err = w.Write(byteEncodeUint64(touint64(h.bodyLen)))
-	if err != nil {
-		return total, err
-	}
-
-	total = total + int64(n)
-
-	log.Infof("comp body length: %v", byteEncodeUint64(touint64(h.compBodyLen)))
-	n, err = w.Write(byteEncodeUint64(touint64(h.compBodyLen)))
-	if err != nil {
-		return total, err
-	}
-
-	total = total + int64(n)
-
-	return total, nil
+	return n, nil
 }

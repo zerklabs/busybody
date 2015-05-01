@@ -1,7 +1,5 @@
 package protocol
 
-import "github.com/zerklabs/auburn/log"
-
 const (
 	HelloMessage    int = 0
 	StandardMessage int = 1
@@ -25,8 +23,8 @@ const (
 // |                      Compressed Length                        |
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 // /                                                               /
-// \                           Content                             \
-// /                                                               /
+// \                                                               \
+// /                           Content                             /
 // |                                                               |
 // v                                                               v
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -34,9 +32,9 @@ const (
 
 func NewMessage(msgtype int, comptype int, id string) *Message {
 	return &Message{
-		Header:     buildMessageHeader(msgtype, comptype, id),
-		raw:        make([]byte, 0),
-		compressed: make([]byte, 0),
+		Header: buildMessageHeader(msgtype, comptype, id),
+		buf:    make([]byte, 36), // 36 bytes to cover the header copy
+		off:    0,
 	}
 }
 
@@ -58,12 +56,15 @@ func Decode(msg []byte) (Message, error) {
 			timestamp:       timestamp,
 			bodyLen:         bodylen,
 			compBodyLen:     compbodylen,
+			off:             0,
 		},
+		buf: make([]byte, 0),
+		off: 0,
 	}
 
-	protocol.compressed = msg[36:]
-	if err := protocol.decompress(); err != nil {
-		log.Error(err)
+	_, err := protocol.Write(msg[36:])
+	if err != nil {
+		return protocol, err
 	}
 
 	return protocol, nil

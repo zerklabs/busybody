@@ -14,15 +14,13 @@ func TestNewMessage(t *testing.T) {
 	id := fmt.Sprintf("%x", hash.Sum(nil))
 	msg := NewMessage(StandardMessage, NoCompression, id)
 
-	buf := bytes.NewBuffer(nil)
-	n, err := msg.Write(buf)
+	_, err := msg.Write([]byte("this is a message"))
 	if err != nil {
 		t.Error(err)
 	}
 
-	t.Logf("wrote %d bytes", n)
-	t.Logf("message %#v", buf.Bytes())
-	msg.Print()
+	// t.Logf("wrote %d bytes", n)
+	// msg.Print()
 }
 
 func TestDecode(t *testing.T) {
@@ -32,18 +30,16 @@ func TestDecode(t *testing.T) {
 	id := fmt.Sprintf("%x", hash.Sum(nil))
 	msg := NewMessage(StandardMessage, SnappyCompression, id)
 
-	contentBuffer := bytes.NewBuffer(nil)
-	contentBuffer.WriteString("Supercalifragilisticexpialidocious")
-	msg.ReadFrom(contentBuffer)
+	content := "Supercalifragilisticexpialidocious"
 
-	buf := bytes.NewBuffer(nil)
-	if _, err := msg.Write(buf); err != nil {
-		t.Error(err)
-	}
+	msg.Write([]byte(content))
 
-	// t.Logf("original message: %#v", msg)
+	msgb := bytes.NewBuffer(nil)
+	msgb.ReadFrom(msg)
 
-	decmsg, err := Decode(buf.Bytes())
+	// t.Logf("msg bytes: %v", msgb.Bytes())
+
+	decmsg, err := Decode(msgb.Bytes())
 	if err != nil {
 		t.Error(err)
 	}
@@ -64,15 +60,16 @@ func TestDecode(t *testing.T) {
 		t.Errorf("decoding source timestamp header failed, found %d, expected %d", decmsg.Header.timestamp, msg.Header.timestamp)
 	}
 
-	if !bytes.Equal(decmsg.raw, msg.raw) {
-		t.Errorf("decoding message content failed, found %s, expected %s", string(decmsg.raw), string(msg.raw))
+	if !bytes.Equal(decmsg.buf, msg.buf) {
+		t.Errorf("decoding message content failed, found:\n%v\nexpected:\n%v\n", decmsg.buf, msg.buf)
 	}
 
-	if !bytes.Equal(decmsg.compressed, msg.compressed) {
-		t.Errorf("decoding compressed message content failed, found %v, expected %v", decmsg.compressed, msg.compressed)
+	body, err := decmsg.Body()
+	if err != nil {
+		t.Error(err)
 	}
 
-	t.Logf("original content: %s, decoded content: %s", string(msg.raw), string(decmsg.raw))
-
-	// decmsg.Print()
+	if content != string(body) {
+		t.Errorf("incorrect body decoded")
+	}
 }
