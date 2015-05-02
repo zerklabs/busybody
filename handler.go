@@ -1,11 +1,13 @@
 package busybody
 
+import "github.com/zerklabs/busybody/protocol"
+
 type Handler interface {
-	HandleMessage(message *BusyMessage) error
+	HandleMessage(msg *protocol.Message) error
 }
 
-type HandlerFunc func(message *BusyMessage) error
+type HandlerFunc func(msg *protocol.Message) error
 
-func (h HandlerFunc) HandleMessage(m *BusyMessage) error {
-	return h(m)
+func (h HandlerFunc) HandleMessage(msg *protocol.Message) error {
+	return h(msg)
 }

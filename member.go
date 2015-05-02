@@ -28,7 +28,7 @@ type BusyMember struct {
 	terminate bool
 	handlers  []Handler
 
-	incomingMessages chan BusyMessage
+	incomingMessages chan *protocol.Message
 	StopChan         chan int
 
 	introTicker     *time.Ticker
@@ -36,7 +36,7 @@ type BusyMember struct {
 }
 
 func New(config []byte) (BusyMember, error) {
-	bussock, err := createBusSock(make(map[string]interface{}, 0))
+	bussock, err := newBusSocket(make(map[string]interface{}, 0))
 	if err != nil {
 		return BusyMember{}, err
 	}
@@ -62,7 +62,7 @@ func New(config []byte) (BusyMember, error) {
 		introTicker:      time.NewTicker(introDuration),
 		peerShareTicker:  time.NewTicker(peerShareDuration),
 		peers:            make([]Introduction, 0),
-		incomingMessages: make(chan BusyMessage, 5),
+		incomingMessages: make(chan *protocol.Message),
 		StopChan:         make(chan int),
 		handlers:         make([]Handler, 0),
 	}
@@ -229,14 +229,14 @@ func (m *BusyMember) handlerLoop() {
 			goto exit
 		}
 
-		if message.Type == protocol.StandardMessage {
+		if message.MessageType() == protocol.StandardMessage {
 			for _, handler := range m.handlers {
-				handler.HandleMessage(&message)
+				handler.HandleMessage(message)
 			}
 		}
 
-		if message.Type == protocol.HelloMessage {
-			intro, err := UnmarshalIntroduction(&message)
+		if message.MessageType() == protocol.HelloMessage {
+			intro, err := UnmarshalIntroduction(message)
 			if err != nil {
 				log.Error(err)
 				continue
@@ -291,25 +291,14 @@ func (m *BusyMember) Listen() error {
 			return err
 		}
 
-		// TODO(rch): this should be present in the protocol header
-		ct := protocol.NoCompression
-
-		if m.config.DeflateCompression {
-			ct = protocol.DeflateCompression
-		}
-
-		if m.config.SnappyCompression {
-			ct = protocol.SnappyCompression
-		}
-
-		bmsg, err := UnmarshalBusyMessage(msg, ct)
+		bmsg, err := protocol.Decode(msg)
 		if err != nil {
 			log.Error(err)
 			continue
 		}
 
 		// we ignore messages from ourselves
-		if bmsg.Sender != m.id {
+		if bmsg.Sender() != m.id {
 			m.incomingMessages <- bmsg
 		}
 	}

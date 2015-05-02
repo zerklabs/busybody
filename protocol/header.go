@@ -24,25 +24,6 @@ type MessageHeader struct {
 	off int // buf offset
 }
 
-func buildMessageHeader(msgtype int, comptype int, id string) MessageHeader {
-	now := time.Now().UnixNano()
-
-	return MessageHeader{
-		version:         1,
-		msgType:         msgtype,
-		sourceId:        id,
-		timestamp:       now,
-		compressionType: comptype,
-		bodyLen:         0,
-		compBodyLen:     0,
-		off:             0, // offset
-	}
-}
-
-func (h *MessageHeader) Print() {
-	log.Infof("%#v", h)
-}
-
 func byteEncodeUint32(v uint32) []byte {
 	b := make([]byte, 4)
 
@@ -67,12 +48,6 @@ func byteEncodeUint64(v uint64) []byte {
 	b[7] = byte(v)
 
 	return b
-}
-
-func (h *MessageHeader) encodeFlags() uint32 {
-	return uint32(h.version&0xf)<<28 +
-		uint32(h.msgType&0xf)<<16 +
-		uint32(h.compressionType&0xf)<<8
 }
 
 func readUint32(b []byte) uint32 {
@@ -102,6 +77,31 @@ func decodeTimestamp(v uint64) int64 {
 
 func decodeSourceId(v []byte) string {
 	return string(v)
+}
+
+func (h *MessageHeader) encodeFlags() uint32 {
+	return uint32(h.version&0xf)<<28 +
+		uint32(h.msgType&0xf)<<16 +
+		uint32(h.compressionType&0xf)<<8
+}
+
+func buildMessageHeader(msgtype int, comptype int, id string) MessageHeader {
+	now := time.Now().UnixNano()
+
+	return MessageHeader{
+		version:         1,
+		msgType:         msgtype,
+		sourceId:        id,
+		timestamp:       now,
+		compressionType: comptype,
+		bodyLen:         0,
+		compBodyLen:     0,
+		off:             0, // offset
+	}
+}
+
+func (h *MessageHeader) Print() {
+	log.Infof("%#v", h)
 }
 
 func (h *MessageHeader) Read(p []byte) (n int, err error) {

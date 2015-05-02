@@ -38,7 +38,7 @@ func NewMessage(msgtype int, comptype int, id string) *Message {
 	}
 }
 
-func Decode(msg []byte) (Message, error) {
+func Decode(msg []byte) (*Message, error) {
 
 	// flag word
 	version, msgtype, comptype := decodeHeaderFlags(readUint32(msg[:4]))
@@ -47,7 +47,7 @@ func Decode(msg []byte) (Message, error) {
 	bodylen := int64(readUint64(msg[20:28]))
 	compbodylen := int64(readUint64(msg[28:36]))
 
-	protocol := Message{
+	protocol := &Message{
 		Header: MessageHeader{
 			version:         version,
 			msgType:         msgtype,

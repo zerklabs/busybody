@@ -19,8 +19,35 @@ type Message struct {
 	off    int // read offset
 }
 
-func (p *Message) Print() {
-	log.Infof("%#v", p)
+func (m *Message) Print() {
+	log.Infof("%#v", m)
+}
+
+// Version returns the message format version
+func (m *Message) Version() int {
+	return m.Header.version
+}
+
+// MessageType returns the message type
+func (m *Message) MessageType() int {
+	return m.Header.msgType
+}
+
+// CompressionType returns the type of compression used on the
+// body of the message
+func (m *Message) CompressionType() int {
+	return m.Header.compressionType
+}
+
+// Timestamp returns the unix timestamp when the message was created
+// on the sender side. (nanosecond format)
+func (m *Message) Timestamp() int64 {
+	return m.Header.timestamp
+}
+
+// Sender returns the string ID of the host who sent the message
+func (m *Message) Sender() string {
+	return m.Header.sourceId
 }
 
 func (m *Message) Body() ([]byte, error) {
