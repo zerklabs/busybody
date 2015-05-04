@@ -35,7 +35,6 @@ func TestNewMessage_Snappy(t *testing.T) {
 	}
 
 	t.Logf("wrote %d bytes", n)
-	msg.Print()
 }
 
 func TestNewMessage_Deflate(t *testing.T) {
@@ -47,7 +46,6 @@ func TestNewMessage_Deflate(t *testing.T) {
 	}
 
 	t.Logf("wrote %d bytes", n)
-	msg.Print()
 }
 
 func TestDecode(t *testing.T) {
@@ -60,7 +58,7 @@ func TestDecode(t *testing.T) {
 	msgb := bytes.NewBuffer(nil)
 	msgb.ReadFrom(msg)
 
-	t.Logf("msg.buf len: %d", len(msg.buf))
+	t.Logf("msg.buf len: %d, %#v", len(msg.buf), msg)
 
 	decmsg, err := Decode(msgb.Bytes())
 	if err != nil {
@@ -109,7 +107,7 @@ func TestDecode_Deflate(t *testing.T) {
 	msgb := bytes.NewBuffer(nil)
 	msgb.ReadFrom(msg)
 
-	t.Logf("msg.buf len: %d", len(msg.buf))
+	t.Logf("msg.buf len: %d, %#v", len(msg.buf), msg)
 
 	decmsg, err := Decode(msgb.Bytes())
 	if err != nil {
@@ -156,7 +154,7 @@ func TestDecode_Zlib(t *testing.T) {
 	msgb := bytes.NewBuffer(nil)
 	msgb.ReadFrom(msg)
 
-	t.Logf("msg.buf len: %d", len(msg.buf))
+	t.Logf("msg.buf len: %d, %#v", len(msg.buf), msg)
 
 	decmsg, err := Decode(msgb.Bytes())
 	if err != nil {

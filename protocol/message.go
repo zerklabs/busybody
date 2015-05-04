@@ -168,7 +168,7 @@ func (m *Message) Write(p []byte) (int64, error) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
-	m.Header.bodyLen = int64(len(p))
+	m.Header.bodyLen = len(p)
 
 	switch m.Header.compressionType {
 	case NoCompression:
@@ -271,7 +271,7 @@ func (m *Message) Write(p []byte) (int64, error) {
 		buf.Reset()
 	}
 
-	m.Header.compBodyLen = int64(len(m.buf))
+	m.Header.compBodyLen = len(m.buf)
 
 	return written, nil
 }

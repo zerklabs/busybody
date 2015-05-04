@@ -38,16 +38,16 @@ func (m *BusyMember) hellomsg() *protocol.Message {
 	return protocol.NewMessage(protocol.HelloMessage, ct, m.id)
 }
 
-func UnmarshalIntroduction(p *protocol.Message) (Introduction, error) {
+func UnmarshalIntroduction(p *protocol.Message) (*Introduction, error) {
 	var intro Introduction
 
 	if p.MessageType() != protocol.HelloMessage {
-		return Introduction{}, fmt.Errorf("not a hello message")
+		return nil, fmt.Errorf("not a hello message")
 	}
 
 	body, err := p.Body()
 	if err != nil {
-		return Introduction{}, err
+		return nil, err
 	}
 
 	buffer := bytes.NewBuffer(body)
@@ -55,25 +55,25 @@ func UnmarshalIntroduction(p *protocol.Message) (Introduction, error) {
 
 	if err := decoder.Decode(&intro); err != nil {
 		if err != io.EOF {
-			return Introduction{}, fmt.Errorf("error gob decoding introduction: %v", err)
+			return nil, fmt.Errorf("error gob decoding introduction: %v", err)
 		} else {
 			log.Warnf("error during gob decoding: %v", err)
 		}
 	}
 
 	if intro.Id == "" {
-		return Introduction{}, fmt.Errorf("invalid introduction message: id missing")
+		return nil, fmt.Errorf("invalid introduction message: id missing")
 	}
 
 	if intro.Uri == "" {
-		return Introduction{}, fmt.Errorf("invalid introduction message: uri missing")
+		return nil, fmt.Errorf("invalid introduction message: uri missing")
 	}
 
 	if intro.Key == "" {
 		log.Warnf("shared key is empty")
 	}
 
-	return intro, nil
+	return &intro, nil
 }
 
 func (m *BusyMember) hello() error {
@@ -90,7 +90,7 @@ func (m *BusyMember) hello() error {
 	}
 
 	if _, err := msg.Write(buffer.Bytes()); err != nil {
-		return err
+		return fmt.Errorf("error writing content to message: %v", err)
 	}
 
 	return m.send(msg)
@@ -101,16 +101,13 @@ func (m *BusyMember) Send(content []byte) error {
 	msg := m.defaultMessage()
 
 	if _, err := msg.Write(content); err != nil {
-		return err
+		return fmt.Errorf("error writing content to message: %v", err)
 	}
 
 	return m.send(msg)
 }
 
 func (m *BusyMember) send(msg *protocol.Message) error {
-	m.msgsync.Lock()
-	defer m.msgsync.Unlock()
-
 	sendbuf := bytes.NewBuffer(nil)
 	n, err := sendbuf.ReadFrom(msg)
 	if err != nil {
@@ -123,6 +120,30 @@ func (m *BusyMember) send(msg *protocol.Message) error {
 
 	if err := m.bussock.Send(sendbuf.Bytes()); err != nil {
 		return fmt.Errorf("error sending message: %v", err)
+	}
+
+	return nil
+}
+
+func (m *BusyMember) share() error {
+	peers := m.Members()
+
+	for _, peer := range peers {
+		if peer.Id != "" && peer.state == HealthyState {
+			buffer := bytes.NewBuffer(nil)
+			encoder := gob.NewEncoder(buffer)
+			msg := m.hellomsg()
+
+			if err := encoder.Encode(peer); err != nil {
+				return fmt.Errorf("error gob encoding message: %v", err)
+			}
+
+			msg.Write(buffer.Bytes())
+
+			if err := m.send(msg); err != nil {
+				return err
+			}
+		}
 	}
 
 	return nil

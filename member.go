@@ -18,21 +18,24 @@ import (
 // tls+tcp://x.x.x.x:ZZZZ
 
 type BusyMember struct {
-	msgsync sync.Mutex
-	lock    sync.RWMutex
-
-	bussock   mangos.Socket
-	config    BusyConfig
-	id        string
-	hostname  string
-	peers     []Introduction
-	terminate bool
-	handlers  []Handler
-
+	lock             sync.RWMutex
+	bussock          mangos.Socket
+	config           *BusyConfig
+	id               string
+	hostname         string
+	peers            []Introduction
+	terminate        bool
+	handlers         []Handler
 	incomingMessages chan *protocol.Message
 	StopChan         chan int
+	swimTicker       *time.Ticker
+	swimTimeout      *time.Timer
+	swimWaitGroup    sync.WaitGroup
+	polling          bool
+}
 
-	swimTicker *time.Ticker
+func init() {
+	rand.Seed(time.Now().UnixNano())
 }
 
 func New(config []byte) (*BusyMember, error) {
@@ -50,20 +53,19 @@ func New(config []byte) (*BusyMember, error) {
 		return nil, err
 	}
 
-	swimDuration, _ := time.ParseDuration(conf.SwimInterval)
-	// swimTimeout, _ := time.ParseDuration(conf.SwimTimeout)
-
 	member := &BusyMember{
 		hostname:         hostname,
 		id:               crc32hash(hostname),
 		bussock:          bussock,
 		config:           conf,
 		terminate:        false,
-		swimTicker:       time.NewTicker(swimDuration),
+		swimTicker:       time.NewTicker(conf.SwimInterval),
+		swimTimeout:      time.NewTimer(conf.SwimTimeout),
 		peers:            make([]Introduction, 0),
 		incomingMessages: make(chan *protocol.Message),
 		StopChan:         make(chan int),
 		handlers:         make([]Handler, 0),
+		polling:          false,
 	}
 
 	for _, v := range member.config.Peers {
@@ -71,6 +73,9 @@ func New(config []byte) (*BusyMember, error) {
 			return nil, err
 		}
 	}
+
+	// stop the timeout ticker
+	member.swimTimeout.Stop()
 
 	return member, nil
 }
@@ -105,7 +110,7 @@ func (m *BusyMember) AddPeer(peer string) error {
 	}
 
 	if !exists {
-		intro := Introduction{Uri: peer}
+		intro := Introduction{Key: m.config.SharedKey, Uri: peer, connected: false, state: HealthyState}
 		if err := m.bussock.Dial(peer); err != nil {
 			return err
 		}
@@ -149,6 +154,7 @@ func (m *BusyMember) DialBus(p *Introduction) error {
 
 // randomPeer selects a random peer from this nodes peer list
 func (m *BusyMember) randomPeer() *Introduction {
+	time.After(time.Second * 2)
 	idx := rand.Intn(len(m.peers))
 
 	return &m.peers[idx]
@@ -156,10 +162,27 @@ func (m *BusyMember) randomPeer() *Introduction {
 
 // selectPeerGroup returns k peers for this node, excluding the target
 func (m *BusyMember) selectPeerGroup(target *Introduction) []*Introduction {
+	var k int
+
 	group := make([]*Introduction, 0)
 
-	k := int((len(m.peers) - 1) / 2)
+	if len(m.peers) == 0 {
+		return nil
+	}
 
+	for {
+		time.After(time.Second * 2)
+		k = rand.Intn(len(m.peers))
+
+		if k != 0 {
+			break
+		}
+	}
+
+	// log.Infof("selectPeerGroup(k): %d", k)
+
+	// if our peer list is smaller than than 3, add the other peers
+	// excluding the target
 	if k <= 0 {
 		for i := range m.peers {
 			if m.peers[i].Id != target.Id {
@@ -183,28 +206,28 @@ func (m *BusyMember) selectPeerGroup(target *Introduction) []*Introduction {
 	return group
 }
 
-func (m *BusyMember) updatePeer(intro Introduction) error {
+func (m *BusyMember) updatePeer(intro *Introduction) error {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
 	exists := false
 	if intro.Id == m.id {
-		return fmt.Errorf("cannot add self to peer list")
+		return nil
 	}
 
 	for i, v := range m.peers {
 		if v.Uri == intro.Uri {
 			exists = true
-			if v.Id == "" && v.Key == "" {
-				m.peers[i] = intro
-				if m.peers[i].connected {
-					m.peers[i] = intro
-					m.peers[i].connected = true
-				} else {
+			if v.Id == "" {
+
+				if !m.peers[i].connected {
 					if err := m.DialBus(&m.peers[i]); err != nil {
 						return err
 					}
 				}
+				m.peers[i] = *intro
+				m.peers[i].connected = true
+				m.peers[i].state = HealthyState
 
 				if m.config.LogLevel >= log.INFO {
 					log.Infof("updated peer: %#v", intro)
@@ -214,11 +237,14 @@ func (m *BusyMember) updatePeer(intro Introduction) error {
 	}
 
 	if !exists {
-		if err := m.DialBus(&intro); err != nil {
+		if err := m.DialBus(intro); err != nil {
 			return err
 		}
 
-		m.peers = append(m.peers, intro)
+		intro.state = HealthyState
+		intro.connected = true
+
+		m.peers = append(m.peers, *intro)
 	}
 
 	return nil
@@ -239,9 +265,23 @@ func (m *BusyMember) Close() error {
 func (m *BusyMember) notificationLoop() {
 	for {
 		select {
+		case <-m.swimTimeout.C:
+			if m.polling {
+				m.polling = false
+			}
 		case <-m.swimTicker.C:
-			if err := m.hello(); err != nil {
-				log.Error(err)
+			m.swimTimeout.Reset(m.config.SwimTimeout)
+
+			for {
+				if err := m.hello(); err != nil {
+					log.Error(err)
+				}
+
+				if err := m.share(); err != nil {
+					log.Error(err)
+				}
+
+				break
 			}
 		}
 	}
@@ -256,7 +296,9 @@ func (m *BusyMember) handlerLoop() {
 
 		if message.MessageType() == protocol.StandardMessage {
 			for _, handler := range m.handlers {
-				handler.HandleMessage(message)
+				if err := handler.HandleMessage(message); err != nil {
+					log.Errorf("error during HandleMessage: %v", err)
+				}
 			}
 		}
 
@@ -318,7 +360,7 @@ func (m *BusyMember) Listen() error {
 
 		bmsg, err := protocol.Decode(msg)
 		if err != nil {
-			log.Error(err)
+			log.Errorf("error decoding message: %v", err)
 			continue
 		}
 

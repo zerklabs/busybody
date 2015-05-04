@@ -2,47 +2,53 @@ package busybody
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
 
-const DefaultSwimInterval = "1m0s"
-const DefaultSwimTimeout = "30s"
+const DefaultSwimInterval = "2m0s"
+const DefaultSwimTimeout = "1m0s"
 
 type BusyConfig struct {
-	Uri                     string   `toml:"uri"`
-	Peers                   []string `toml:"peers"`
-	SharedKey               string   `toml:"shared_key"`
-	SnappyCompression       bool     `toml:"snappy_compression"`
-	ZlibCompression         bool     `toml:"Zlib_compression"`
-	DeflateCompression      bool     `toml:"deflate_compression"`
-	DeflateCompressionLevel int      `toml:"deflate_compression_level"`
-	LogLevel                int      `toml:"log_level"`
-	SwimInterval            string   `toml:"swim_interval"`
-	SwimTimeout             string   `toml:"swim_timeout"`
+	DeflateCompression      bool          `toml:"deflate_compression"`
+	DeflateCompressionLevel int           `toml:"deflate_compression_level"`
+	LogLevel                int           `toml:"log_level"`
+	Peers                   []string      `toml:"peers"`
+	SharedKey               string        `toml:"shared_key"`
+	SnappyCompression       bool          `toml:"snappy_compression"`
+	SwimIntervalStr         string        `toml:"swim_interval"`
+	SwimTimeoutStr          string        `toml:"swim_timeout"`
+	SwimInterval            time.Duration `toml:"-"`
+	SwimTimeout             time.Duration `toml:"-"`
+	Uri                     string        `toml:"uri"`
+	ZlibCompression         bool          `toml:"zlib_compression"`
 }
 
-func ParseConfig(config []byte) (BusyConfig, error) {
+func ParseConfig(config []byte) (*BusyConfig, error) {
 	var conf BusyConfig
 	if _, err := toml.Decode(string(config), &conf); err != nil {
-		return BusyConfig{}, err
+		return nil, err
 	}
 
 	if conf.Uri == "" {
-		return BusyConfig{}, fmt.Errorf("uri required in config")
+		return nil, fmt.Errorf("uri required in config")
 	}
 
-	if conf.SwimInterval == "" {
-		conf.SwimInterval = DefaultSwimInterval
+	if conf.SwimIntervalStr == "" {
+		conf.SwimIntervalStr = DefaultSwimInterval
 	}
 
-	if conf.SwimTimeout == "" {
-		conf.SwimTimeout = DefaultSwimTimeout
+	if conf.SwimTimeoutStr == "" {
+		conf.SwimTimeoutStr = DefaultSwimTimeout
 	}
+
+	conf.SwimTimeout, _ = time.ParseDuration(DefaultSwimTimeout)
+	conf.SwimInterval, _ = time.ParseDuration(DefaultSwimInterval)
 
 	if conf.SnappyCompression && conf.DeflateCompression && conf.ZlibCompression {
-		return BusyConfig{}, fmt.Errorf("only one of snappy, deflate or zlib can be used")
+		return nil, fmt.Errorf("only one of snappy, deflate or zlib can be used")
 	}
 
-	return conf, nil
+	return &conf, nil
 }

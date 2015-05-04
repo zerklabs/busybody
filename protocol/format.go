@@ -25,11 +25,11 @@ const (
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 // |                         Timestamp                             |
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-// |                         Sender ID                             |
-// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 // |                         Raw Length                            |
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 // |                      Compressed Length                        |
+// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+// |                         Sender ID                             |
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 // /                                                               /
 // \                                                               \
@@ -57,25 +57,12 @@ func Decode(msg []byte) (*Message, error) {
 		return nil, fmt.Errorf("header missing from message")
 	}
 
-	version, msgtype, comptype := decodeHeaderFlags(readUint32(msg[:4]))
-	timestamp := decodeTimestamp(readUint64(msg[4:12]))
-	id := decodeSourceId(msg[12:20])
-	bodylen := int64(readUint64(msg[20:28]))
-	compbodylen := int64(readUint64(msg[28:36]))
+	header := rebuildHeader(msg[:36])
 
 	protocol := &Message{
-		Header: MessageHeader{
-			version:         version,
-			msgType:         msgtype,
-			compressionType: comptype,
-			sourceId:        id,
-			timestamp:       timestamp,
-			bodyLen:         bodylen,
-			compBodyLen:     compbodylen,
-			off:             0,
-		},
-		buf: make([]byte, 0),
-		off: 0,
+		Header: header,
+		buf:    make([]byte, 0),
+		off:    0,
 	}
 
 	if len(msg) > 36 {
@@ -85,5 +72,6 @@ func Decode(msg []byte) (*Message, error) {
 		}
 	}
 
+	// return protocol, nil
 	return protocol, nil
 }
