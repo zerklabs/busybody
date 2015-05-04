@@ -1,12 +1,21 @@
 package protocol
 
-const (
-	HelloMessage    int = 0
-	StandardMessage int = 1
+import "fmt"
 
-	NoCompression      int = 0
-	SnappyCompression  int = 1
-	DeflateCompression int = 2
+const (
+	HelloMessage int = iota
+	PingMessage
+	PingReqMessage
+	PingReplyMessage
+	PingRelayMessage
+	StandardMessage
+)
+
+const (
+	NoCompression int = iota
+	SnappyCompression
+	DeflateCompression
+	ZlibCompression
 )
 
 //  0                   1                   2                   3
@@ -39,8 +48,15 @@ func NewMessage(msgtype int, comptype int, id string) *Message {
 }
 
 func Decode(msg []byte) (*Message, error) {
+	if len(msg) == 0 {
+		return nil, fmt.Errorf("empty message")
+	}
 
 	// flag word
+	if len(msg) < 36 {
+		return nil, fmt.Errorf("header missing from message")
+	}
+
 	version, msgtype, comptype := decodeHeaderFlags(readUint32(msg[:4]))
 	timestamp := decodeTimestamp(readUint64(msg[4:12]))
 	id := decodeSourceId(msg[12:20])
@@ -62,9 +78,11 @@ func Decode(msg []byte) (*Message, error) {
 		off: 0,
 	}
 
-	_, err := protocol.Write(msg[36:])
-	if err != nil {
-		return protocol, err
+	if len(msg) > 36 {
+		_, err := protocol.Write(msg[36:])
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return protocol, nil

@@ -60,16 +60,48 @@ func (m *Message) Body() ([]byte, error) {
 func (m *Message) Read(p []byte) (n int, err error) {
 	// initial buffer to contain the header
 	pbuf := make([]byte, 36)
+	// bbuf := bytes.NewBuffer(nil)
 
 	n, err = m.Header.Read(pbuf)
 	if err != nil {
 		return 0, err
 	}
 
+	// log.Infof("%v", pbuf)
+
+	// for i := range pbuf {
+	// 	log.Infof("%d=%v", i, pbuf[i])
+	// }
+
 	switch m.Header.compressionType {
 	case NoCompression:
-		pbuf = append(pbuf, m.buf...)
+		for i := range m.buf {
+			pbuf = append(pbuf, m.buf[i])
+		}
+		break
 	case DeflateCompression:
+		buf := bytes.NewBuffer(m.buf)
+		rawbuf := bytes.NewBuffer(nil)
+
+		r := flate.NewReader(buf)
+		if _, nerr := rawbuf.ReadFrom(r); nerr != nil {
+			err = fmt.Errorf("error reading from flate stream: %v", nerr)
+			return
+		}
+
+		if nerr := r.Close(); nerr != nil {
+			err = fmt.Errorf("error closing flate stream: %v", nerr)
+			return
+		}
+
+		pbuf = append(pbuf, rawbuf.Bytes()...)
+
+		// free-up resources
+		rawbuf.Reset()
+		buf.Reset()
+
+		break
+	case ZlibCompression:
 		buf := bytes.NewBuffer(m.buf)
 		gz, nerr := zlib.NewReader(buf)
 		if nerr != nil {
@@ -94,6 +126,7 @@ func (m *Message) Read(p []byte) (n int, err error) {
 		rawbuf.Reset()
 		buf.Reset()
 
+		break
 	case SnappyCompression:
 		buf := bytes.NewBuffer(m.buf)
 		w := snappystream.NewReader(buf, false)
@@ -109,9 +142,10 @@ func (m *Message) Read(p []byte) (n int, err error) {
 		// free-up resources
 		rawbuf.Reset()
 		buf.Reset()
+		break
 	}
 
-	if m.off >= len(m.buf) {
+	if m.off >= len(pbuf) {
 		if len(p) == 0 {
 			return
 		}
@@ -138,13 +172,46 @@ func (m *Message) Write(p []byte) (int64, error) {
 
 	switch m.Header.compressionType {
 	case NoCompression:
-		if len(m.buf) < len(p) {
-			m.buf = makeSlice(len(p))
+		m.buf = p
+
+		written += int64(len(m.buf))
+	case DeflateCompression:
+		buf := bytes.NewBuffer(nil)
+		rawbuf := bytes.NewBuffer(p)
+
+		w, err := flate.NewWriter(buf, flate.BestCompression)
+		if err != nil {
+			return 0, err
 		}
 
-		n := copy(m.buf, p)
+		nn, err := rawbuf.WriteTo(w)
+		written += nn
+		if err != nil {
+			return written, fmt.Errorf("error writing to flate stream: %v", err)
+		}
+
+		if err := w.Flush(); err != nil {
+			return written, fmt.Errorf("error flushing flate stream: %v", err)
+		}
+
+		if err := w.Close(); err != nil {
+			return written, fmt.Errorf("error closing flate stream: %v", err)
+		}
+
+		// expand the buffer to the compressed data length
+		if len(m.buf) < buf.Len() {
+			m.buf = makeSlice(buf.Len())
+		}
+
+		// store the compressed input
+		n := copy(m.buf, buf.Bytes())
 		written += int64(n)
-	case DeflateCompression:
+
+		// free-up resources
+		rawbuf.Reset()
+		buf.Reset()
+		break
+	case ZlibCompression:
 		buf := bytes.NewBuffer(nil)
 		gz, err := zlib.NewWriterLevel(buf, flate.BestCompression)
 		if err != nil {

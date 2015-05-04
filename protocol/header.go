@@ -111,23 +111,18 @@ func (h *MessageHeader) Read(p []byte) (n int, err error) {
 	tsWord := touint64(h.timestamp)
 
 	buf := byteEncodeUint32(flagsWord)
-	// log.Infof("flags: %v, %d bytes", buf, len(buf))
 	bytebuf.Write(buf)
 
 	buf64 := byteEncodeUint64(tsWord)
-	// log.Infof("timestamp: %v, %d bytes", buf64, len(buf64))
 	bytebuf.Write(buf64)
 
 	buf64 = byteEncodeUint64(binary.BigEndian.Uint64([]byte(h.sourceId)))
-	// log.Infof("source id: %v, %d bytes", buf64, len(buf64))
 	bytebuf.Write(buf64)
 
 	buf64 = byteEncodeUint64(touint64(h.bodyLen))
-	// log.Infof("raw body length: %v, %d bytes", buf64, len(buf64))
 	bytebuf.Write(buf64)
 
 	buf64 = byteEncodeUint64(touint64(h.compBodyLen))
-	// log.Infof("comp body length: %v, %d bytes", buf64, len(buf64))
 	bytebuf.Write(buf64)
 
 	if h.off >= bytebuf.Len() {

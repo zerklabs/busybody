@@ -5,6 +5,7 @@ import (
 	// "github.com/gdamore/mangos/transport/tlstcp"
 
 	"fmt"
+	"math/rand"
 	"strings"
 	"sync"
 	"time"
@@ -31,36 +32,34 @@ type BusyMember struct {
 	incomingMessages chan *protocol.Message
 	StopChan         chan int
 
-	introTicker     *time.Ticker
-	peerShareTicker *time.Ticker
+	swimTicker *time.Ticker
 }
 
-func New(config []byte) (BusyMember, error) {
+func New(config []byte) (*BusyMember, error) {
 	bussock, err := newBusSocket(make(map[string]interface{}, 0))
 	if err != nil {
-		return BusyMember{}, err
+		return nil, err
 	}
 
 	if len(config) == 0 {
-		return BusyMember{}, fmt.Errorf("configuration missing")
+		return nil, fmt.Errorf("configuration missing")
 	}
 
 	conf, err := ParseConfig(config)
 	if err != nil {
-		return BusyMember{}, err
+		return nil, err
 	}
 
-	introDuration, _ := time.ParseDuration(conf.IntroInterval)
-	peerShareDuration, _ := time.ParseDuration(conf.PeerShareInterval)
+	swimDuration, _ := time.ParseDuration(conf.SwimInterval)
+	// swimTimeout, _ := time.ParseDuration(conf.SwimTimeout)
 
-	member := BusyMember{
+	member := &BusyMember{
 		hostname:         hostname,
 		id:               crc32hash(hostname),
 		bussock:          bussock,
 		config:           conf,
 		terminate:        false,
-		introTicker:      time.NewTicker(introDuration),
-		peerShareTicker:  time.NewTicker(peerShareDuration),
+		swimTicker:       time.NewTicker(swimDuration),
 		peers:            make([]Introduction, 0),
 		incomingMessages: make(chan *protocol.Message),
 		StopChan:         make(chan int),
@@ -69,7 +68,7 @@ func New(config []byte) (BusyMember, error) {
 
 	for _, v := range member.config.Peers {
 		if err := member.AddPeer(v); err != nil {
-			return BusyMember{}, err
+			return nil, err
 		}
 	}
 
@@ -77,8 +76,8 @@ func New(config []byte) (BusyMember, error) {
 }
 
 // Generates an introduction message for this node
-func (m *BusyMember) Introduction() Introduction {
-	return Introduction{
+func (m *BusyMember) Introduction() *Introduction {
+	return &Introduction{
 		Key: m.config.SharedKey,
 		Id:  m.id,
 		Uri: m.config.Uri,
@@ -148,6 +147,42 @@ func (m *BusyMember) DialBus(p *Introduction) error {
 	return nil
 }
 
+// randomPeer selects a random peer from this nodes peer list
+func (m *BusyMember) randomPeer() *Introduction {
+	idx := rand.Intn(len(m.peers))
+
+	return &m.peers[idx]
+}
+
+// selectPeerGroup returns k peers for this node, excluding the target
+func (m *BusyMember) selectPeerGroup(target *Introduction) []*Introduction {
+	group := make([]*Introduction, 0)
+
+	k := int((len(m.peers) - 1) / 2)
+
+	if k <= 0 {
+		for i := range m.peers {
+			if m.peers[i].Id != target.Id {
+				group = append(group, &m.peers[i])
+			}
+		}
+	} else {
+		count := 0
+		for i := range m.peers {
+			if m.peers[i].Id != target.Id {
+				group = append(group, &m.peers[i])
+				count += 1
+			}
+
+			if count == k {
+				break
+			}
+		}
+	}
+
+	return group
+}
+
 func (m *BusyMember) updatePeer(intro Introduction) error {
 	m.lock.Lock()
 	defer m.lock.Unlock()
@@ -193,8 +228,7 @@ func (m *BusyMember) Close() error {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
-	m.introTicker.Stop()
-	m.peerShareTicker.Stop()
+	m.swimTicker.Stop()
 	m.terminate = true
 	close(m.StopChan)
 	close(m.incomingMessages)
@@ -205,18 +239,9 @@ func (m *BusyMember) Close() error {
 func (m *BusyMember) notificationLoop() {
 	for {
 		select {
-		case <-m.introTicker.C:
+		case <-m.swimTicker.C:
 			if err := m.hello(); err != nil {
 				log.Error(err)
-			}
-		case <-m.peerShareTicker.C:
-			if m.config.PeerSharing {
-				if m.config.LogLevel >= log.DEBUG {
-					log.Debugf("sharing %d peers", len(m.peers))
-				}
-				if err := m.share(); err != nil {
-					log.Error(err)
-				}
 			}
 		}
 	}

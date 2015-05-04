@@ -10,13 +10,6 @@ import (
 	"github.com/zerklabs/busybody/protocol"
 )
 
-type Introduction struct {
-	Key       string
-	Id        string
-	Uri       string
-	connected bool
-}
-
 func (m *BusyMember) defaultMessage() *protocol.Message {
 	ct := protocol.NoCompression
 
@@ -83,32 +76,6 @@ func UnmarshalIntroduction(p *protocol.Message) (Introduction, error) {
 	return intro, nil
 }
 
-// Send this nodes peer list to all of it's peers
-func (m *BusyMember) share() error {
-	m.lock.Lock()
-	defer m.lock.Unlock()
-
-	for _, peer := range m.peers {
-		buffer := bytes.NewBuffer(nil)
-		encoder := gob.NewEncoder(buffer)
-		msg := m.hellomsg()
-
-		if err := encoder.Encode(peer); err != nil {
-			return fmt.Errorf("error gob encoding message: %v", err)
-		}
-
-		if _, err := msg.Write(buffer.Bytes()); err != nil {
-			return err
-		}
-
-		if err := m.send(msg); err != nil {
-			log.Error(err)
-		}
-	}
-
-	return nil
-}
-
 func (m *BusyMember) hello() error {
 	m.lock.Lock()
 	defer m.lock.Unlock()
@@ -129,6 +96,7 @@ func (m *BusyMember) hello() error {
 	return m.send(msg)
 }
 
+// Send writes the given byte slice to the underlying protocol message
 func (m *BusyMember) Send(content []byte) error {
 	msg := m.defaultMessage()
 

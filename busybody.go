@@ -10,6 +10,20 @@ var (
 	hostname string
 )
 
+const (
+	HealthyState int = iota
+	SuspiciousState
+	FaultyState
+)
+
+type Introduction struct {
+	Key       string
+	Id        string
+	Uri       string
+	connected bool
+	state     int
+}
+
 func init() {
 	h, err := os.Hostname()
 	if err != nil {

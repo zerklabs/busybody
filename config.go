@@ -6,20 +6,20 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-const DefaultPeerShareInterval = "5m0s"
-const DefaultIntroductionInterval = "1m0s"
+const DefaultSwimInterval = "1m0s"
+const DefaultSwimTimeout = "30s"
 
 type BusyConfig struct {
 	Uri                     string   `toml:"uri"`
 	Peers                   []string `toml:"peers"`
 	SharedKey               string   `toml:"shared_key"`
 	SnappyCompression       bool     `toml:"snappy_compression"`
+	ZlibCompression         bool     `toml:"Zlib_compression"`
 	DeflateCompression      bool     `toml:"deflate_compression"`
 	DeflateCompressionLevel int      `toml:"deflate_compression_level"`
 	LogLevel                int      `toml:"log_level"`
-	IntroInterval           string   `toml:"introduction_interval"`
-	PeerSharing             bool     `toml:"enable_peer_sharing"`
-	PeerShareInterval       string   `toml:"peer_share_interval"`
+	SwimInterval            string   `toml:"swim_interval"`
+	SwimTimeout             string   `toml:"swim_timeout"`
 }
 
 func ParseConfig(config []byte) (BusyConfig, error) {
@@ -32,16 +32,16 @@ func ParseConfig(config []byte) (BusyConfig, error) {
 		return BusyConfig{}, fmt.Errorf("uri required in config")
 	}
 
-	if conf.IntroInterval == "" {
-		conf.IntroInterval = DefaultIntroductionInterval
+	if conf.SwimInterval == "" {
+		conf.SwimInterval = DefaultSwimInterval
 	}
 
-	if conf.PeerShareInterval == "" {
-		conf.IntroInterval = DefaultPeerShareInterval
+	if conf.SwimTimeout == "" {
+		conf.SwimTimeout = DefaultSwimTimeout
 	}
 
-	if conf.SnappyCompression && conf.DeflateCompression {
-		return BusyConfig{}, fmt.Errorf("only snappy or deflate can be used")
+	if conf.SnappyCompression && conf.DeflateCompression && conf.ZlibCompression {
+		return BusyConfig{}, fmt.Errorf("only one of snappy, deflate or zlib can be used")
 	}
 
 	return conf, nil
