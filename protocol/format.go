@@ -3,46 +3,40 @@ package protocol
 import "fmt"
 
 const (
-	HelloMessage int = iota
-	PingMessage
-	PingReqMessage
-	PingReplyMessage
-	PingRelayMessage
-	StandardMessage
+	HelloMessage     int = 0
+	PingMessage      int = 1
+	PingReqMessage   int = 2
+	PingReplyMessage int = 3
+	PingRelayMessage int = 4
+	StandardMessage  int = 5
 )
 
 const (
-	NoCompression int = iota
-	SnappyCompression
-	DeflateCompression
-	ZlibCompression
+	NoCompression      int = 0
+	SnappyCompression  int = 1
+	DeflateCompression int = 2
+	ZlibCompression    int = 3
 )
 
 //  0                   1                   2                   3
 //  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-// |      Version       |      Msg Type     |    Compression Type  |
-// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-// |                         Timestamp                             |
-// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-// |                         Raw Length                            |
-// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-// |                      Compressed Length                        |
-// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-// |                         Sender ID                             |
+// /                                                               /
+// \                           Header                              \
+// /                                                               /
+// |                                                               |
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 // /                                                               /
-// \                                                               \
-// /                           Content                             /
+// \                           Content                             \
+// /                                                               /
 // |                                                               |
-// v                                                               v
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 //
 
 func NewMessage(msgtype int, comptype int, id string) *Message {
 	return &Message{
 		Header: buildMessageHeader(msgtype, comptype, id),
-		buf:    make([]byte, 36), // 36 bytes to cover the header copy
+		buf:    make([]byte, 0),
 		off:    0,
 	}
 }
@@ -52,12 +46,10 @@ func Decode(msg []byte) (*Message, error) {
 		return nil, fmt.Errorf("empty message")
 	}
 
-	// flag word
-	if len(msg) < 36 {
-		return nil, fmt.Errorf("header missing from message")
+	n, header, err := rebuildHeader(msg)
+	if err != nil {
+		return nil, err
 	}
-
-	header := rebuildHeader(msg[:36])
 
 	protocol := &Message{
 		Header: header,
@@ -65,8 +57,9 @@ func Decode(msg []byte) (*Message, error) {
 		off:    0,
 	}
 
-	if len(msg) > 36 {
-		_, err := protocol.Write(msg[36:])
+	// n also accounts for the NULSEP byte sequence
+	if len(msg) > n {
+		_, err := protocol.Write(msg[n:])
 		if err != nil {
 			return nil, err
 		}

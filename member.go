@@ -32,6 +32,7 @@ type BusyMember struct {
 	swimTimeout      *time.Timer
 	swimWaitGroup    sync.WaitGroup
 	polling          bool
+	listening        bool
 }
 
 func init() {
@@ -59,6 +60,7 @@ func New(config []byte) (*BusyMember, error) {
 		bussock:          bussock,
 		config:           conf,
 		terminate:        false,
+		listening:        false,
 		swimTicker:       time.NewTicker(conf.SwimInterval),
 		swimTimeout:      time.NewTimer(conf.SwimTimeout),
 		peers:            make([]Introduction, 0),
@@ -80,6 +82,10 @@ func New(config []byte) (*BusyMember, error) {
 	return member, nil
 }
 
+func (m *BusyMember) Uri() string {
+	return m.config.Uri
+}
+
 // Generates an introduction message for this node
 func (m *BusyMember) Introduction() *Introduction {
 	return &Introduction{
@@ -87,6 +93,21 @@ func (m *BusyMember) Introduction() *Introduction {
 		Id:  m.id,
 		Uri: m.config.Uri,
 	}
+}
+
+func (m *BusyMember) connectToPeers() error {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
+	for _, peer := range m.peers {
+		if !peer.connected {
+			if err := m.DialBus(&peer); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
 }
 
 func (m *BusyMember) AddPeer(peer string) error {
@@ -111,19 +132,22 @@ func (m *BusyMember) AddPeer(peer string) error {
 
 	if !exists {
 		intro := Introduction{Key: m.config.SharedKey, Uri: peer, connected: false, state: HealthyState}
-		if err := m.bussock.Dial(peer); err != nil {
-			return err
+
+		if m.listening {
+			if err := m.bussock.Dial(peer); err != nil {
+				return err
+			}
+
+			// flag the connection state
+			intro.connected = true
+			// pause for join
+			time.Sleep(time.Second)
+			if m.config.LogLevel >= log.INFO {
+				log.Infof("successfully connected to: %s", peer)
+			}
 		}
 
-		// flag the connection state
-		intro.connected = true
 		m.peers = append(m.peers, intro)
-
-		// pause for join
-		time.Sleep(time.Second)
-		if m.config.LogLevel >= log.INFO {
-			log.Infof("successfully connected to: %s", peer)
-		}
 	}
 
 	return nil
@@ -344,6 +368,14 @@ func (m *BusyMember) Listen() error {
 	if err := m.bussock.Listen(m.config.Uri); err != nil {
 		return err
 	}
+
+	m.listening = true
+
+	if err := m.connectToPeers(); err != nil {
+		return err
+	}
+
+	time.After(time.Second * 2)
 
 	// start dealing with incoming messages
 	go m.handlerLoop()

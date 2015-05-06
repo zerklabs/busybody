@@ -17,35 +17,35 @@ func testhostname() string {
 func TestNewMessage(t *testing.T) {
 	msg := NewMessage(StandardMessage, NoCompression, testhostname())
 
-	n, err := msg.Write([]byte("this is a message"))
+	_, err := msg.Write([]byte("this is a message"))
 	if err != nil {
 		t.Error(err)
 	}
 
-	t.Logf("wrote %d bytes", n)
-	msg.Print()
+	// t.Logf("wrote %d bytes", n)
+	// msg.Print()
 }
 
 func TestNewMessage_Snappy(t *testing.T) {
 	msg := NewMessage(StandardMessage, SnappyCompression, testhostname())
 
-	n, err := msg.Write([]byte("this is a message"))
+	_, err := msg.Write([]byte("this is a message"))
 	if err != nil {
 		t.Error(err)
 	}
 
-	t.Logf("wrote %d bytes", n)
+	// t.Logf("wrote %d bytes", n)
 }
 
 func TestNewMessage_Deflate(t *testing.T) {
 	msg := NewMessage(StandardMessage, DeflateCompression, testhostname())
 
-	n, err := msg.Write([]byte("this is a message"))
+	_, err := msg.Write([]byte("this is a message"))
 	if err != nil {
 		t.Error(err)
 	}
 
-	t.Logf("wrote %d bytes", n)
+	// t.Logf("wrote %d bytes", n)
 }
 
 func TestDecode(t *testing.T) {
@@ -58,27 +58,35 @@ func TestDecode(t *testing.T) {
 	msgb := bytes.NewBuffer(nil)
 	msgb.ReadFrom(msg)
 
-	t.Logf("msg.buf len: %d, %#v", len(msg.buf), msg)
+	t.Logf("msg length (compressed): %d", msg.Length())
+	t.Logf("msg length (uncompressed): %d", msg.DecodedLength())
 
 	decmsg, err := Decode(msgb.Bytes())
 	if err != nil {
 		t.Error(err)
 	}
 
-	if decmsg.Header.msgType != msg.Header.msgType {
+	t.Logf("decoded msg length (compressed): %d", decmsg.Length())
+	t.Logf("decoded msg length (uncompressed): %d", decmsg.DecodedLength())
+
+	if decmsg.Header.MsgType != msg.Header.MsgType {
 		t.Errorf("decoding msg type failed")
 	}
 
-	if decmsg.Header.compressionType != msg.Header.compressionType {
+	if decmsg.Header.CompressionType != msg.Header.CompressionType {
 		t.Errorf("decoding compression type failed")
 	}
 
-	if decmsg.Header.sourceId != testhostname() {
-		t.Errorf("decoding source id header failed, found %s, expected %s", decmsg.Header.sourceId, testhostname())
+	if decmsg.Header.SourceId != testhostname() {
+		t.Errorf("decoding source id header failed, found %s, expected %s", decmsg.Header.SourceId, testhostname())
 	}
 
-	if decmsg.Header.timestamp != msg.Header.timestamp {
-		t.Errorf("decoding source timestamp header failed, found %d, expected %d", decmsg.Header.timestamp, msg.Header.timestamp)
+	if decmsg.Header.Timestamp != msg.Header.Timestamp {
+		t.Errorf("decoding source Timestamp header failed, found %d, expected %d", decmsg.Header.Timestamp, msg.Header.Timestamp)
+	}
+
+	if decmsg.Length() != msg.Length() {
+		t.Errorf("decoded message length did not match original message length: %d, %d", decmsg.Length(), msg.Length())
 	}
 
 	if !bytes.Equal(decmsg.buf, msg.buf) {
@@ -107,27 +115,31 @@ func TestDecode_Deflate(t *testing.T) {
 	msgb := bytes.NewBuffer(nil)
 	msgb.ReadFrom(msg)
 
-	t.Logf("msg.buf len: %d, %#v", len(msg.buf), msg)
+	t.Logf("msg length (compressed): %d", msg.Length())
+	t.Logf("msg length (uncompressed): %d", msg.DecodedLength())
 
 	decmsg, err := Decode(msgb.Bytes())
 	if err != nil {
 		t.Error(err)
 	}
 
-	if decmsg.Header.msgType != msg.Header.msgType {
+	t.Logf("decoded msg length (compressed): %d", decmsg.Length())
+	t.Logf("decoded msg length (uncompressed): %d", decmsg.DecodedLength())
+
+	if decmsg.Header.MsgType != msg.Header.MsgType {
 		t.Errorf("decoding msg type failed")
 	}
 
-	if decmsg.Header.compressionType != msg.Header.compressionType {
+	if decmsg.Header.CompressionType != msg.Header.CompressionType {
 		t.Errorf("decoding compression type failed")
 	}
 
-	if decmsg.Header.sourceId != testhostname() {
-		t.Errorf("decoding source id header failed, found %s, expected %s", decmsg.Header.sourceId, testhostname())
+	if decmsg.Header.SourceId != testhostname() {
+		t.Errorf("decoding source id header failed, found %s, expected %s", decmsg.Header.SourceId, testhostname())
 	}
 
-	if decmsg.Header.timestamp != msg.Header.timestamp {
-		t.Errorf("decoding source timestamp header failed, found %d, expected %d", decmsg.Header.timestamp, msg.Header.timestamp)
+	if decmsg.Header.Timestamp != msg.Header.Timestamp {
+		t.Errorf("decoding source Timestamp header failed, found %d, expected %d", decmsg.Header.Timestamp, msg.Header.Timestamp)
 	}
 
 	if !bytes.Equal(decmsg.buf, msg.buf) {
@@ -154,27 +166,35 @@ func TestDecode_Zlib(t *testing.T) {
 	msgb := bytes.NewBuffer(nil)
 	msgb.ReadFrom(msg)
 
-	t.Logf("msg.buf len: %d, %#v", len(msg.buf), msg)
+	t.Logf("msg length (compressed): %d", msg.Length())
+	t.Logf("msg length (uncompressed): %d", msg.DecodedLength())
 
 	decmsg, err := Decode(msgb.Bytes())
 	if err != nil {
 		t.Error(err)
 	}
 
-	if decmsg.Header.msgType != msg.Header.msgType {
+	t.Logf("decoded msg length (compressed): %d", decmsg.Length())
+	t.Logf("decoded msg length (uncompressed): %d", decmsg.DecodedLength())
+
+	if decmsg.Header.MsgType != msg.Header.MsgType {
 		t.Errorf("decoding msg type failed")
 	}
 
-	if decmsg.Header.compressionType != msg.Header.compressionType {
+	if decmsg.Header.CompressionType != msg.Header.CompressionType {
 		t.Errorf("decoding compression type failed")
 	}
 
-	if decmsg.Header.sourceId != testhostname() {
-		t.Errorf("decoding source id header failed, found %s, expected %s", decmsg.Header.sourceId, testhostname())
+	if decmsg.Header.SourceId != testhostname() {
+		t.Errorf("decoding source id header failed, found %s, expected %s", decmsg.Header.SourceId, testhostname())
 	}
 
-	if decmsg.Header.timestamp != msg.Header.timestamp {
-		t.Errorf("decoding source timestamp header failed, found %d, expected %d", decmsg.Header.timestamp, msg.Header.timestamp)
+	if decmsg.Header.Timestamp != msg.Header.Timestamp {
+		t.Errorf("decoding source Timestamp header failed, found %d, expected %d", decmsg.Header.Timestamp, msg.Header.Timestamp)
+	}
+
+	if decmsg.Length() != msg.Length() {
+		t.Errorf("decoded message length did not match original message length: %d, %d", decmsg.Length(), msg.Length())
 	}
 
 	if !bytes.Equal(decmsg.buf, msg.buf) {
@@ -201,27 +221,39 @@ func TestDecode_Snappy(t *testing.T) {
 	msgb := bytes.NewBuffer(nil)
 	msgb.ReadFrom(msg)
 
-	t.Logf("msg.buf len: %d", len(msg.buf))
+	t.Logf("original msg length (compressed): %d", msg.Length())
+	t.Logf("original msg length (uncompressed): %d", msg.DecodedLength())
 
 	decmsg, err := Decode(msgb.Bytes())
 	if err != nil {
 		t.Error(err)
 	}
 
-	if decmsg.Header.msgType != msg.Header.msgType {
+	t.Logf("decoded msg length (compressed): %d", decmsg.Length())
+	t.Logf("decoded msg length (uncompressed): %d", decmsg.DecodedLength())
+
+	if decmsg.Header.MsgType != msg.Header.MsgType {
 		t.Errorf("decoding msg type failed")
 	}
 
-	if decmsg.Header.compressionType != msg.Header.compressionType {
+	if decmsg.Header.CompressionType != msg.Header.CompressionType {
 		t.Errorf("decoding compression type failed")
 	}
 
-	if decmsg.Header.sourceId != testhostname() {
-		t.Errorf("decoding source id header failed, found %s, expected %s", decmsg.Header.sourceId, testhostname())
+	if decmsg.Header.SourceId != testhostname() {
+		t.Errorf("decoding source id header failed, found %s, expected %s", decmsg.Header.SourceId, testhostname())
 	}
 
-	if decmsg.Header.timestamp != msg.Header.timestamp {
-		t.Errorf("decoding source timestamp header failed, found %d, expected %d", decmsg.Header.timestamp, msg.Header.timestamp)
+	if decmsg.Header.Timestamp != msg.Header.Timestamp {
+		t.Errorf("decoding source Timestamp header failed, found %d, expected %d", decmsg.Header.Timestamp, msg.Header.Timestamp)
+	}
+
+	if decmsg.Length() != msg.Length() {
+		t.Errorf("decoded message length did not match original message length: %d, %d", decmsg.Length(), msg.Length())
+	}
+
+	if decmsg.Length() != msg.Length() {
+		t.Errorf("decoded message length did not match original message length: %d, %d", decmsg.Length(), msg.Length())
 	}
 
 	if !bytes.Equal(decmsg.buf, msg.buf) {

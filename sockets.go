@@ -10,6 +10,7 @@ import (
 	"github.com/gdamore/mangos/protocol/rep"
 	"github.com/gdamore/mangos/protocol/req"
 	"github.com/gdamore/mangos/protocol/surveyor"
+	"github.com/gdamore/mangos/transport/ipc"
 	"github.com/gdamore/mangos/transport/tcp"
 )
 
@@ -22,8 +23,10 @@ func newSurveySocket(options map[string]interface{}) (mangos.Socket, error) {
 	}
 
 	tp := tcp.NewTransport()
+	ipctp := ipc.NewTransport()
 
 	sock.AddTransport(tp)
+	sock.AddTransport(ipctp)
 
 	for k, v := range options {
 		if err := sock.SetOption(k, v); err != nil {
@@ -43,7 +46,10 @@ func newBusSocket(options map[string]interface{}) (mangos.Socket, error) {
 	}
 
 	tp := tcp.NewTransport()
+	ipctp := ipc.NewTransport()
+
 	sock.AddTransport(tp)
+	sock.AddTransport(ipctp)
 
 	for k, v := range options {
 		if err := sock.SetOption(k, v); err != nil {
@@ -63,7 +69,10 @@ func newPushSocket(options map[string]interface{}) (mangos.Socket, error) {
 	}
 
 	tp := tcp.NewTransport()
+	ipctp := ipc.NewTransport()
+
 	sock.AddTransport(tp)
+	sock.AddTransport(ipctp)
 
 	for k, v := range options {
 		if err := sock.SetOption(k, v); err != nil {
@@ -83,7 +92,10 @@ func newPullSocket(options map[string]interface{}) (mangos.Socket, error) {
 	}
 
 	tp := tcp.NewTransport()
+	ipctp := ipc.NewTransport()
+
 	sock.AddTransport(tp)
+	sock.AddTransport(ipctp)
 
 	for k, v := range options {
 		if err := sock.SetOption(k, v); err != nil {
@@ -103,7 +115,10 @@ func newRequestSocket(options map[string]interface{}) (mangos.Socket, error) {
 	}
 
 	tp := tcp.NewTransport()
+	ipctp := ipc.NewTransport()
+
 	sock.AddTransport(tp)
+	sock.AddTransport(ipctp)
 
 	for k, v := range options {
 		if err := sock.SetOption(k, v); err != nil {
@@ -123,7 +138,10 @@ func newReplySocket(options map[string]interface{}) (mangos.Socket, error) {
 	}
 
 	tp := tcp.NewTransport()
+	ipctp := ipc.NewTransport()
+
 	sock.AddTransport(tp)
+	sock.AddTransport(ipctp)
 
 	for k, v := range options {
 		if err := sock.SetOption(k, v); err != nil {
